@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "eca",
+  "name": "ECA",
+  "version": "0.1.0",
+  "author": "Oliver Marks",
+  "license": "MIT",
+  "homepage": "https://eca.dev/",
+  "description": "An ECA (Editor Code Assistant, https://eca.dev) client for the Omarchy shell: runs `eca server` per workspace and chats with it directly — streaming replies, reasoning, tool calls with approval, diffs, chat history, model/agent/variant selection — from the bar or a pop-out window.",
+  "kinds": ["service", "bar-widget"],
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "ECA",
+    "description": "Chat with ECA (Editor Code Assistant) from the bar. Lights up while ECA works or needs your approval.",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "autoStart": false,
+      "notifications": true,
+      "panelWidth": 560,
+      "panelHeight": 720,
+      "ecaBinary": "",
+      "projectRoots": ""
+    },
+    "schema": [
+      { "key": "autoStart", "type": "boolean", "label": "Start the last workspace's ECA server with the shell", "defaultValue": false },
+      { "key": "notifications", "type": "boolean", "label": "Notify on tool approvals, questions and errors", "defaultValue": true },
+      { "key": "panelWidth", "type": "integer", "label": "Popup width", "min": 360, "max": 1400, "step": 20, "defaultValue": 560 },
+      { "key": "panelHeight", "type": "integer", "label": "Popup height", "min": 300, "max": 1400, "step": 20, "defaultValue": 720 },
+      { "key": "ecaBinary", "type": "string", "label": "eca binary (blank = auto-detect)", "defaultValue": "" },
+      { "key": "projectRoots", "type": "string", "label": "Extra project roots, colon-separated", "defaultValue": "" }
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{:tasks
+ {:test {:doc "Run the test suite: bb test/run_tests.bb"
+         :task (apply clojure.core/exec "bb" ["test/run_tests.bb"])}
+
+  :lint {:doc "Lint .bb files with clj-kondo (requires clj-kondo on PATH)"
+         :task (apply clojure.core/exec
+                      "clj-kondo"
+                      ["--lint" "eca_bridge.bb" "eca_workspaces.bb"
+                       "--fail-level" "error"])}}}

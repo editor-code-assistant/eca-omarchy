@@ -1,0 +1,12 @@
+# Omarchy plugin — gitignore
+#
+# bin/bb is intentionally tracked (committed by CI so the plugin ships
+# self-contained).  Everything else below is excluded.
+
+# Editor / OS noise
+.DS_Store
+*.swp
+*~
+
+# Local development scratch
+.env
