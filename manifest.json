@@ -6,6 +6,7 @@
   "author": "Oliver Marks",
   "license": "MIT",
   "homepage": "https://eca.dev/",
+  "repository": "https://github.com/olymk2/omarchy-eca",
   "description": "An ECA (Editor Code Assistant, https://eca.dev) client for the Omarchy shell: runs `eca server` per workspace and chats with it directly — streaming replies, reasoning, tool calls with approval, diffs, chat history, model/agent/variant selection — from the bar or a pop-out window.",
   "kinds": ["service", "bar-widget"],
   "entryPoints": {

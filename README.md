@@ -33,36 +33,38 @@ Requirements: Omarchy shell and the `eca` binary (`eca` on `PATH`, the copy
 eca-emacs downloads, or configured in the widget settings).
 
 `bb` (Babashka) is **not required** — the plugin ships a pre-built `bin/bb`
-binary committed by CI on every release.
-
-### From git (recommended)
+### From git (the only way end users need)
 
 ```bash
 omarchy plugin add https://github.com/<user>/omarchy-eca.git --enable
 ```
 
-That's it. Omarchy clones the repo, validates the manifest, and enables the bar
-widget. The bundled `bin/bb` is included in the clone so no system-wide `bb` is
-needed.
+Omarchy clones the repo, validates the manifest, and enables the bar widget.
+On first use the plugin automatically downloads `bb` (Babashka) and the `eca`
+server to `~/.local/bin/` and shows progress in the widget status line.
+Nothing needs to be pre-installed.
 
-To update later:
+To update:
 
 ```bash
-omarchy plugin update eca
+omarchy plugin update eca   # pulls latest code
+omarchy-restart-shell        # picks up the new QML
 ```
 
-### Manual / development install
+### Development only — `install.sh`
+
+`install.sh` is **not called by `omarchy plugin add`** — it is a convenience
+script for iterating on the plugin from a local checkout:
 
 ```bash
 ./install.sh          # symlink checkout → plugins/eca (default, best for dev)
-./install.sh --copy   # copy files instead (for deployment or if symlink fails)
+./install.sh --copy   # copy files (for testing the copy path)
 ./install.sh --link   # force (re)create the symlink
 ```
 
-**Symlink mode** (default) points `~/.config/omarchy/plugins/eca` directly at the
-checkout — edits are live immediately with no copy step. The shell hot-reloads
-most changes on `rescanPlugins`; changes to `IpcHandler` functions need
-`omarchy-restart-shell`.
+**Symlink mode** (default) points `~/.config/omarchy/plugins/eca` directly at
+the checkout — edits are live immediately. Changes to `IpcHandler` functions
+need `omarchy-restart-shell`.
 
 **Copy mode** copies all files into the plugins folder. Use this when you want
 a stable installed copy independent of the checkout, or if you hit a validation

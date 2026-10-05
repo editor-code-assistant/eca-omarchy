@@ -35,6 +35,116 @@ Item {
   }
   readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state")) + "/omarchy-eca"
   readonly property string version: manifest && manifest.version ? manifest.version : "0.1.0"
+  readonly property string installScriptPath: pluginDir + "/eca_install.bb"
+
+  // ---- eca setup and update -----------------------------------------------
+  // Two-phase startup:
+  //   1. eca_setup.sh (bash, no dependencies) — ensures bb and eca are present.
+  //      Streams JSON lines so the UI can show live download progress.
+  //      Runs once per session; takes <100ms when both binaries are already installed.
+  //   2. eca_install.bb (bb) — background update check after setup completes.
+  //      Compares current eca version against the latest GitHub release and
+  //      updates ~/.local/bin/eca if a newer version is available.
+  //
+  // ecaInstallStatus: "" | "checking" | "installing" | "ready" | "failed"
+  property string ecaInstallStatus: ""
+  property string ecaInstallMessage: ""    // detail shown during checking/installing
+  property string ecaInstallVersion: ""
+  property string ecaInstallError: ""
+  property bool _setupRun: false
+  // True once eca_setup.sh has successfully completed and ecaBinary is known.
+  // Sessions must not start until this is true.
+  property bool _setupDone: false
+  // Workspace queued while setup is still running.
+  property string _pendingWorkspace: ""
+
+  function runSetup() {
+    if (_setupRun || setupProc.running) return
+    _setupRun = true
+    ecaInstallStatus = "checking"
+    ecaInstallMessage = "Checking for ECA…"
+    setupProc.running = true
+  }
+
+  function retrySetup() {
+    // Re-run setup after a failure — resets all guards so the download is retried.
+    if (setupProc.running) return
+    _setupRun = false
+    _setupDone = false
+    ecaInstallStatus = ""
+    ecaInstallError  = ""
+    runSetup()
+  }
+
+  function handleSetupLine(line) {
+    var trimmed = String(line || "").trim()
+    if (trimmed === "") return
+    try {
+      var data = JSON.parse(trimmed)
+      switch (data.step) {
+        case "checking":
+          ecaInstallStatus  = "checking"
+          ecaInstallMessage = "Checking for ECA…"
+          break
+        case "downloading":
+          ecaInstallStatus  = "installing"
+          ecaInstallMessage = data.message || ("Downloading " + (data.what || "ECA") + "…")
+          break
+                case "done":
+                  ecaInstallStatus = "ready"
+                  ecaInstallMessage = ""
+                  ecaInstallVersion = data.ecaVersion || ""
+                  // Set ecaBinary from the script's resolved path if not explicitly configured.
+                  if (ecaBinary === "" && data.eca) {
+                    ecaBinary = String(data.eca)
+                    for (var k in sessions) sessions[k].ecaBinary = ecaBinary
+                  }
+                  // Unblock session startup — safe to start now.
+                  _setupDone = true
+                  // Now that bb is guaranteed present, run the background update check.
+                  checkForUpdates()
+                  // Start any workspace that was waiting for setup to finish.
+                  if (_pendingWorkspace !== "") {
+                    var ws = _pendingWorkspace
+                    _pendingWorkspace = ""
+                    openWorkspace(ws)
+                  }
+                  // autoStart may have been blocked by setup; try now.
+                  maybeAutoStart()
+                  break
+        case "error":
+          ecaInstallStatus = "failed"
+          ecaInstallError  = data.message || "Setup failed"
+          break
+      }
+    } catch (e) {
+      console.warn("eca: bad setup line:", trimmed)
+    }
+  }
+
+  function checkForUpdates() {
+    // Runs eca_install.bb in the background after setup to update eca if a
+    // newer release is available.  bb is guaranteed to exist at this point.
+    if (updateProc.running) return
+    updateProc.running = true
+  }
+
+  function handleUpdate(text) {
+    try {
+      var data = JSON.parse(String(text || "").trim() || "{}")
+      if (data.status === "updated") {
+        ecaInstallVersion = data.current || ""
+        if (data.path && data.path !== "null" && ecaBinary === "") {
+          ecaBinary = String(data.path)
+          for (var k in sessions) sessions[k].ecaBinary = ecaBinary
+        }
+        Quickshell.execDetached([
+          "notify-send", "-a", "ECA", "-t", "6000",
+          "ECA updated to " + ecaInstallVersion, "Restart your session to use it."
+        ])
+      }
+    } catch (e) { /* update check is best-effort */ }
+  }
 
   // Settings pushed by the bar widget (configure()).
   property string ecaBinary: ""
@@ -138,6 +248,17 @@ Item {
   function openWorkspace(path) {
     var ws = normalize(path)
     if (ws === "") return null
+    // If the install check is still running, hold the start until it finishes
+    // so the bridge picks up the freshly-installed binary path.
+    // Block until setup has finished and ecaBinary is confirmed.
+    // Use _setupDone (not setupProc.running) — the process may not have
+    // registered as running yet when autoStart fires on first load.
+    if (!_setupDone) {
+      _pendingWorkspace = ws
+      currentWorkspace  = ws
+      remember(ws)
+      return sessionFor(ws, true)  // created but not started
+    }
     var s = sessionFor(ws, true)
     s.ecaBinary = root.ecaBinary
     if (s.status === "stopped" || s.status === "exited" || s.status === "error") s.start()
@@ -218,12 +339,52 @@ Item {
     stateFile.setText(JSON.stringify({ recent: recent, currentWorkspace: currentWorkspace }, null, 2) + "\n")
   }
 
+  // Phase 1: bash bootstrap — streams JSON progress lines as it ensures
+  // bb and eca are installed.  No bb required; pure bash + curl + unzip.
+  Process {
+    id: setupProc
+    // Use /usr/bin/env to find bash regardless of Quickshell's PATH.
+    command: ["/usr/bin/env", "bash", root.pluginDir + "/eca_setup.sh"]
+    stdout: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) { root.handleSetupLine(line) }
+    }
+    stderr: SplitParser {
+      splitMarker: "\n"
+      onRead: function(line) {
+        // Capture bash errors — appended to ecaInstallError so the user sees them.
+        var t = String(line || "").trim()
+        if (t !== "") {
+          console.warn("eca-setup:", t)
+          root.ecaInstallError = (root.ecaInstallError ? root.ecaInstallError + "\n" : "") + t
+        }
+      }
+    }
+    onExited: function(code) {
+      if (code !== 0 && root.ecaInstallStatus !== "ready") {
+        root.ecaInstallStatus = "failed"
+        if (!root.ecaInstallError)
+          root.ecaInstallError = "Setup script exited with code " + code
+            + " — see ~/.cache/omarchy-eca/setup.log"
+      }
+    }
+  }
+
+  // Phase 2: bb update checker — runs after setup confirms bb is present.
+  Process {
+    id: updateProc
+    command: root.bbCmd(root.installScriptPath)
+    stdout: StdioCollector { onStreamFinished: root.handleUpdate(text) }
+  }
+
   Process {
     id: mkStateDir
     command: ["mkdir", "-p", root.stateDir]
     running: true
     onExited: stateFile.reload()
   }
+
+  Component.onCompleted: root.runSetup()
 
   FileView {
     id: stateFile

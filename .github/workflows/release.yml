@@ -1,8 +1,7 @@
 name: CI / Release
 
 # lint + test run on every push and PR.
-# bundle only runs on version tags or manual dispatch — and only if
-# lint + test both pass.
+# release is created on version tags — and only if lint + test both pass.
 on:
   push:
     branches: ["main"]
@@ -10,20 +9,6 @@ on:
   pull_request:
     branches: ["main"]
   workflow_dispatch:
-    inputs:
-      bb_version:
-        description: "Babashka version to bundle (e.g. 1.12.196). Leave blank for latest."
-        required: false
-        default: ""
-
-# ── shared helper ────────────────────────────────────────────────────────────
-# Download the latest stable Babashka static binary into ./bb.
-# Used identically by lint, test, and bundle — kept as a YAML anchor so it
-# stays in one place.
-#
-# GitHub Actions doesn't support top-level anchors, so the shared steps are
-# spelled out in each job (they're short).  An alternative is a composite
-# action, but that requires an extra file and adds indirection.
 
 jobs:
   # ── lint ──────────────────────────────────────────────────────────────────
@@ -35,22 +20,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Download bb so we can invoke it if needed, and to confirm scripts load.
       - name: Download Babashka (latest)
-        id: bb
         run: |
           VERSION=$(curl -fsSL https://api.github.com/repos/babashka/babashka/releases/latest \
             | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
           ARCHIVE="babashka-${VERSION}-linux-amd64-static.tar.gz"
           curl -fsSL "https://github.com/babashka/babashka/releases/download/v${VERSION}/${ARCHIVE}" \
             -o bb.tar.gz
-          tar -xzf bb.tar.gz bb
-          chmod +x bb
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Babashka $VERSION ready"
+          tar -xzf bb.tar.gz bb && chmod +x bb
           ./bb --version
 
-      # ── clj-kondo: Babashka / Clojure linter ──────────────────────────────
       - name: Download clj-kondo (latest)
         run: |
           VERSION=$(curl -fsSL https://api.github.com/repos/clj-kondo/clj-kondo/releases/latest \
@@ -59,41 +38,22 @@ jobs:
           curl -fsSL \
             "https://github.com/clj-kondo/clj-kondo/releases/download/v${VERSION}/${ARCHIVE}" \
             -o clj-kondo.zip
-          unzip -q clj-kondo.zip clj-kondo
-          chmod +x clj-kondo
-          echo "clj-kondo $VERSION ready"
+          unzip -q clj-kondo.zip clj-kondo && chmod +x clj-kondo
           ./clj-kondo --version
 
       - name: Lint .bb files with clj-kondo
-        # --fail-level error: warnings are printed but do not fail the job.
-        # To promote warnings to failures, change to --fail-level warning.
-        run: |
-          ./clj-kondo \
-            --lint eca_bridge.bb eca_workspaces.bb \
-            --fail-level error
+        run: ./clj-kondo --lint eca_bridge.bb eca_workspaces.bb --fail-level error
 
-      # ── qmllint: QML syntax checker ───────────────────────────────────────
-      # Quickshell uses many custom QML types not available in the CI image,
-      # so qmllint will emit import warnings — those are expected.  We fail
-      # only on hard syntax errors (exit code 1); warning-only exits are fine.
       - name: Install qmllint
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends qml6-module-qtqml qt6-declarative-dev
 
       - name: Lint QML files with qmllint
-        # continue-on-error: true because Quickshell-specific types (IpcHandler,
-        # Quickshell, BarIconButton, etc.) are not resolvable in CI without the
-        # full Quickshell installation.  Syntax errors will still show in the
-        # job log.  Remove continue-on-error once a Quickshell QML import path
-        # can be provided.
         continue-on-error: true
         run: |
-          echo "Running qmllint on all .qml files …"
-          qmllint \
-            --bare-warnings \
+          qmllint --bare-warnings \
             ChatView.qml ChatWindow.qml Panel.qml Service.qml Session.qml
-          echo "qmllint done (Quickshell type warnings are expected and ignored)"
 
   # ── test ──────────────────────────────────────────────────────────────────
   test:
@@ -111,23 +71,19 @@ jobs:
           ARCHIVE="babashka-${VERSION}-linux-amd64-static.tar.gz"
           curl -fsSL "https://github.com/babashka/babashka/releases/download/v${VERSION}/${ARCHIVE}" \
             -o bb.tar.gz
-          tar -xzf bb.tar.gz bb
-          chmod +x bb
+          tar -xzf bb.tar.gz bb && chmod +x bb
           ./bb --version
 
       - name: Run test suite
-        # Point PATH at the extracted bb so the subprocess tests can find it.
         run: |
           export PATH="$PWD:$PATH"
           ./bb test/run_tests.bb
 
-  # ── bundle ────────────────────────────────────────────────────────────────
-  bundle:
-    name: Bundle bb binary and create release
+  # ── release ───────────────────────────────────────────────────────────────
+  release:
+    name: Create release
     runs-on: ubuntu-latest
-    # Only bundle on version tags or manual dispatch; skip on plain pushes/PRs.
-    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    # Require lint and test to both pass before we ship anything.
+    if: startsWith(github.ref, 'refs/tags/')
     needs: [lint, test]
     permissions:
       contents: write
@@ -135,97 +91,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # -----------------------------------------------------------------------
-      # 1. Resolve the Babashka version to bundle.
-      # -----------------------------------------------------------------------
-      - name: Resolve Babashka version
-        id: bb_version
-        run: |
-          INPUT="${{ github.event.inputs.bb_version }}"
-          TAG="${GITHUB_REF_NAME#v}"
-
-          if [[ -n "$INPUT" ]]; then
-            VERSION="$INPUT"
-          elif [[ -n "$TAG" && "$TAG" =~ ^[0-9] ]]; then
-            VERSION="$TAG"
-          fi
-
-          if [[ -z "$VERSION" ]]; then
-            echo "Fetching latest Babashka release …"
-            VERSION=$(curl -fsSL https://api.github.com/repos/babashka/babashka/releases/latest \
-              | grep '"tag_name"' | sed 's/.*"v\([^"]*\)".*/\1/')
-          fi
-
-          echo "Babashka version: $VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      # -----------------------------------------------------------------------
-      # 2. Download the official static linux-amd64 binary and verify checksum.
-      # -----------------------------------------------------------------------
-      - name: Download Babashka binary
-        run: |
-          VERSION="${{ steps.bb_version.outputs.version }}"
-          ARCHIVE="babashka-${VERSION}-linux-amd64-static.tar.gz"
-          URL="https://github.com/babashka/babashka/releases/download/v${VERSION}/${ARCHIVE}"
-
-          echo "Downloading $URL"
-          curl -fsSL "$URL" -o bb.tar.gz
-
-          SHA_URL="https://github.com/babashka/babashka/releases/download/v${VERSION}/${ARCHIVE}.sha256"
-          EXPECTED=$(curl -fsSL "$SHA_URL" | awk '{print $1}')
-          echo "$EXPECTED  bb.tar.gz" | sha256sum --check
-
-          tar -xzf bb.tar.gz bb
-          chmod +x bb
-          ./bb --version
-
-      # -----------------------------------------------------------------------
-      # 3. Install binary into bin/ and commit it back to the repo.
-      # -----------------------------------------------------------------------
-      - name: Install binary into bin/
-        run: |
-          mkdir -p bin
-          cp bb bin/bb
-          chmod +x bin/bb
-          echo "bb version: $(bin/bb --version)"
-
-      - name: Commit bin/bb back to repository
-        run: |
-          VERSION="${{ steps.bb_version.outputs.version }}"
-          BB_VER="$(bin/bb --version)"
-
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add bin/bb
-          if git diff --cached --quiet; then
-            echo "bin/bb unchanged — nothing to commit"
-          else
-            BRANCH=$(git branch -r --contains "$GITHUB_SHA" \
-              | grep -v 'HEAD' | sed 's|origin/||' | head -1 | tr -d ' ')
-            BRANCH="${BRANCH:-main}"
-
-            git commit -F - <<EOF
-          chore: bundle babashka ${VERSION} binary
-
-          Automated update by the release workflow.
-          bb version: ${BB_VER}
-          Source: https://github.com/babashka/babashka/releases/tag/v${VERSION}
-          EOF
-
-            git push origin "HEAD:${BRANCH}"
-            echo "Pushed updated bin/bb to ${BRANCH}"
-          fi
-
-      # -----------------------------------------------------------------------
-      # 4. Create the GitHub release with bin/bb as an attached asset.
-      # -----------------------------------------------------------------------
       - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           name: "omarchy-eca ${{ github.ref_name }}"
@@ -236,15 +103,14 @@ jobs:
             omarchy plugin add https://github.com/${{ github.repository }}.git --enable
             ```
 
-            This release bundles **Babashka ${{ steps.bb_version.outputs.version }}** as `bin/bb`,
-            so `bb` does not need to be installed on your machine.
+            On first use the plugin automatically downloads and installs `bb` (Babashka)
+            and the `eca` server, showing progress in the widget. Nothing needs to be
+            pre-installed — the plugin manages its own runtime dependencies.
 
             ## Manual install / update
 
             ```bash
-            ./install.sh        # first install
-            ./install.sh --copy # update an already-enabled plugin
+            ./install.sh        # first install from a local checkout
+            ./install.sh --copy # push changes to an already-enabled plugin
             ```
-          files: |
-            bin/bb
           token: ${{ secrets.GITHUB_TOKEN }}

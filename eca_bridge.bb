@@ -106,7 +106,7 @@
           (System/exit 2))
 
       (nil? eca)
-      (do (emit! {:bridge "error" :message "Could not find the eca binary. Install ECA (https://eca.dev/install/) or set its path in the widget settings."})
+      (do (emit! {:bridge "error" :message "Could not find the eca binary. The plugin should have downloaded it automatically — check ~/.cache/omarchy-eca/setup.log, or set a custom path in the widget settings."})
           (System/exit 3))
 
       :else

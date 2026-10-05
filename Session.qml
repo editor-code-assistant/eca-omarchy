@@ -168,7 +168,11 @@ Item {
     } else if (msg.bridge === "exited") {
       if (status !== "stopping") {
         status = "exited"
-        if (msg.code) error = "eca server exited with code " + msg.code + (serverLog ? " (see " + serverLog + ")" : "")
+        var logHint = serverLog ? " — see " + serverLog : ""
+        if (msg.code)
+          error = "eca server exited with code " + msg.code + logHint
+        else
+          error = "eca server stopped unexpectedly" + logHint
       }
     }
   }

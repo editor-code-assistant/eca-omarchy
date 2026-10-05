@@ -66,9 +66,11 @@ bb_ok() {
 warn_if_no_bb() {
   if ! bb_ok; then
     echo "warning: babashka (bb) not found and bin/bb not present." >&2
-    echo "         Install bb (https://babashka.org) or push a release tag to" >&2
-    echo "         trigger the CI workflow that populates bin/bb." >&2
-    echo "         The plugin will not function until one of these is available." >&2
+    echo "         Push a release tag to trigger CI, which populates bin/bb and bin/eca." >&2
+    echo "         The plugin will not function until bb is available." >&2
+  fi
+  if [[ ! -x "$src/bin/eca" ]]; then
+    echo "note: bin/eca not present — eca_install.bb will download it on first run." >&2
   fi
 }
 
@@ -96,7 +98,7 @@ do_copy() {
   mkdir -p "$dest/bin"
   for f in manifest.json Service.qml Session.qml Panel.qml \
             ChatView.qml ChatWindow.qml \
-            eca_bridge.bb eca_workspaces.bb README.md bb.edn; do
+            eca_bridge.bb eca_workspaces.bb eca_install.bb eca_setup.sh README.md bb.edn; do
     [[ -f "$src/$f" ]] && install -m 0644 "$src/$f" "$dest/$f"
   done
   for f in test/run_tests.bb test/eca_workspaces_test.bb test/eca_bridge_test.bb; do
@@ -105,11 +107,9 @@ do_copy() {
       install -m 0644 "$src/$f" "$dest/$f"
     fi
   done
-  chmod +x "$dest"/*.bb
-  if [[ -x "$src/bin/bb" ]]; then
-    install -m 0755 "$src/bin/bb" "$dest/bin/bb"
-    echo "Copied bin/bb"
-  fi
+  chmod +x "$dest"/*.bb "$dest"/*.sh 2>/dev/null || true
+  if [[ -x "$src/bin/bb" ]];  then install -m 0755 "$src/bin/bb"  "$dest/bin/bb";  echo "Copied bin/bb";  fi
+  if [[ -x "$src/bin/eca" ]]; then install -m 0755 "$src/bin/eca" "$dest/bin/eca"; echo "Copied bin/eca"; fi
   echo "Copied files to: $dest"
 }
 

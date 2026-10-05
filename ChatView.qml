@@ -100,11 +100,25 @@ Item {
 
   function statusText() {
     if (!service) return "ECA service unavailable"
+    // Show install / update progress before a session is active.
+    var inst = service.ecaInstallStatus
+    if (!session || session.status === "stopped") {
+      if (inst === "checking" || inst === "installing")
+        return service.ecaInstallMessage || "Checking for ECA…"
+      if (inst === "failed")
+        return "ECA setup failed — " + (service.ecaInstallError || "unknown error")
+              + " · see ~/.cache/omarchy-eca/setup.log"
+    }
     if (!session) return "Pick a workspace to start ECA"
     if (session.status === "starting") return session.progressText || "Starting ECA server…"
     if (session.status === "stopping") return "Stopping…"
-    if (session.status === "stopped") return "Server stopped"
-    if (session.status === "exited" || session.status === "error") return session.error || "Server exited"
+    if (session.status === "stopped")  return "Server stopped"
+    if (session.status === "exited" || session.status === "error") {
+      // Surface install error in place of the generic "binary not found" message.
+      if (inst === "failed" && service.ecaInstallError)
+        return "ECA install error: " + service.ecaInstallError
+      return session.error || "Server exited"
+    }
     if (chat && chat.progress) return chat.progress
     if (working) return "Working…"
     if (session.progressText) return session.progressText
@@ -198,16 +212,28 @@ Item {
       }
 
       PanelActionButton {
-        visible: !!view.session
-        iconText: view.session && (view.session.status === "ready" || view.session.status === "starting") ? "󰓛" : "󰐊"
+        visible: !!view.session || (view.service && view.service.ecaInstallStatus === "failed")
+        iconText: view.session && (view.session.status === "ready" || view.session.status === "starting") ? "󰓛"
+                  : (view.service && view.service.ecaInstallStatus === "failed") ? "󰑐" : "󰐊"
         tooltipText: view.session && (view.session.status === "ready" || view.session.status === "starting")
-          ? "Stop the ECA server for this workspace" : "Start the ECA server"
-        foreground: view.foreground
+          ? "Stop the ECA server for this workspace"
+          : (view.service && view.service.ecaInstallStatus === "failed")
+            ? "Retry ECA download" : "Start the ECA server"
+        foreground: (view.service && view.service.ecaInstallStatus === "failed") ? view.urgent : view.foreground
         fontFamily: view.fontFamily
         onClicked: {
           var s = view.session
-          if (s.status === "ready" || s.status === "starting") s.stop()
-          else s.start()
+          if (s && (s.status === "ready" || s.status === "starting")) {
+            s.stop()
+          } else if (view.service && view.service.ecaInstallStatus === "failed") {
+            // Setup failed — retry the download rather than trying to start the session.
+            view.service.retrySetup()
+          } else if (view.service && view.service.currentWorkspace) {
+            // Always go through openWorkspace so the _setupDone guard is respected.
+            view.service.openWorkspace(view.service.currentWorkspace)
+          } else if (s) {
+            s.start()
+          }
         }
       }
     }
@@ -411,7 +437,10 @@ Item {
 
       Text {
         id: statusGlyph
-        visible: view.working || (view.session && view.session.status === "starting")
+        visible: view.working
+                 || (view.session && view.session.status === "starting")
+                 || (view.service && (view.service.ecaInstallStatus === "checking"
+                                     || view.service.ecaInstallStatus === "installing"))
         text: "󰔟"
         color: view.urgent
         font.family: view.fontFamily
@@ -425,6 +454,7 @@ Item {
       }
 
       Text {
+        id: statusMsg
         Layout.fillWidth: true
         textFormat: Text.PlainText
         text: view.statusText()
@@ -432,6 +462,32 @@ Item {
         font.family: view.fontFamily
         font.pixelSize: Style.font.caption
         elide: Text.ElideRight
+      }
+
+      // Retry button — shown when setup failed so the user can re-trigger the
+      // download without restarting the shell.
+      PanelActionButton {
+        visible: !!(view.service && view.service.ecaInstallStatus === "failed")
+        iconText: "󰑐"
+        tooltipText: "Retry ECA download"
+        foreground: view.urgent
+        fontFamily: view.fontFamily
+        Layout.alignment: Qt.AlignVCenter
+        onClicked: if (view.service) view.service.retrySetup()
+      }
+
+      // Copy-to-clipboard button — visible on session error/exited so the
+      // log path can be grabbed easily.
+      PanelActionButton {
+        visible: !!(view.session &&
+                    (view.session.status === "exited" || view.session.status === "error") &&
+                    view.statusText() !== "")
+        iconText: "󰆏"
+        tooltipText: "Copy error / log path to clipboard"
+        foreground: view.urgent
+        fontFamily: view.fontFamily
+        Layout.alignment: Qt.AlignVCenter
+        onClicked: Quickshell.execDetached(["wl-copy", view.statusText()])
       }
 
       Text {
