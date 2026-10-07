@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "eca",
-  "name": "ECA",
+  "id": "editor-code-assistant.eca-omarchy",
+  "name": "Editor Code Assistant",
   "version": "0.1.0",
   "author": "Oliver Marks",
   "license": "MIT",
