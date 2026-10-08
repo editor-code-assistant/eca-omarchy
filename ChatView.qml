@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -59,8 +60,18 @@ Item {
     Quickshell.execDetached(["xdg-open", String(url)])
   }
 
+  // Pipe text to wl-copy via stdin — content never appears in argv
+  // (and therefore not in /proc/<pid>/cmdline).
+  Process {
+    id: clipProc
+    command: ["wl-copy"]
+    stdinEnabled: true
+  }
+
   function copy(text) {
-    Quickshell.execDetached(["wl-copy", String(text || "")])
+    clipProc.running = true
+    clipProc.write(String(text || ""))
+    clipProc.closeStdin()
   }
 
   function shortModel(m) {
@@ -487,7 +498,7 @@ Item {
         foreground: view.urgent
         fontFamily: view.fontFamily
         Layout.alignment: Qt.AlignVCenter
-        onClicked: Quickshell.execDetached(["wl-copy", view.statusText()])
+        onClicked: view.copy(view.statusText())
       }
 
       Text {

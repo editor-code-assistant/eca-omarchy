@@ -144,6 +144,33 @@
     (when (< size 1000000)
       (throw (ex-info (str "Downloaded file too small (" size " bytes)") {})))))
 
+(defn verify-sha256!
+  "Fetches the published .sha256 companion file for `url` and verifies
+  `file` against it. Throws if the digest cannot be fetched or does not match.
+  This must be called before extracting or executing any downloaded binary."
+  [url file]
+  (log! "Fetching digest" (str url ".sha256"))
+  (let [sha-url  (str url ".sha256")
+        resp     (try (http/get sha-url {:throw false :timeout 15000})
+                      (catch Exception e
+                        (throw (ex-info (str "Could not fetch digest from " sha-url
+                                             ": " (ex-message e)) {}))))
+        expected (do
+                   (when-not (= 200 (:status resp))
+                     (throw (ex-info (str "Digest fetch failed HTTP " (:status resp)
+                                          " — refusing to execute unverified binary") {})))
+                   (some-> (:body resp) str/trim (str/split #"\s+") first))]
+    (when (str/blank? expected)
+      (throw (ex-info (str "Empty digest response from " sha-url) {})))
+    (let [exit (:exit @(p/process ["sha256sum" "--check" "--quiet" "--status"]
+                                   {:in  (str expected "  " file "\n")
+                                    :out :string
+                                    :err :string}))]
+      (when-not (zero? exit)
+        (throw (ex-info (str "sha256 mismatch for " file
+                             " — download may be corrupted or tampered") {}))))
+    (log! "sha256 verified:" expected)))
+
 (defn extract! [zip-path dest-dir]
   (fs/delete-tree dest-dir)
   (fs/create-dirs dest-dir)
@@ -155,23 +182,24 @@
 (defn update-binary! [tag]
   (let [url (or (download-url tag) (throw (ex-info (str "Unsupported platform: " (arch)) {})))]
     (fs/create-dirs bin-dir)
-    ;; Download
+    ;; Download then verify digest before extracting or executing anything.
     (download! url tmp-zip)
+    (verify-sha256! url tmp-zip)
     ;; Extract (zip root contains just `eca`)
     (extract! tmp-zip tmp-dir)
     (let [extracted (or (some #(when (= "eca" (fs/file-name %)) (str %))
                               (file-seq (fs/file tmp-dir)))
-                        (throw (ex-info "eca binary not found in zip" {})))]
+                        (throw (ex-info "eca binary not found in zip" {})))
+          tmp-bin  (str bin-eca ".new")]
       ;; Atomically replace: write to a temp path then rename
-      (let [tmp-bin (str bin-eca ".new")]
-        (fs/copy extracted tmp-bin {:replace-existing true})
-        (fs/set-posix-file-permissions tmp-bin "rwxr-xr-x")
-        ;; Verify before replacing
-        (let [r @(p/process [tmp-bin "--version"] {:out :string :err :string})]
-          (when-not (zero? (:exit r))
-            (fs/delete-if-exists tmp-bin)
-            (throw (ex-info "Downloaded binary failed version check" {}))))
-        (fs/move tmp-bin bin-eca {:replace-existing true})))
+      (fs/copy extracted tmp-bin {:replace-existing true})
+      (fs/set-posix-file-permissions tmp-bin "rwxr-xr-x")
+      ;; Verify before replacing
+      (let [{:keys [exit]} @(p/process [tmp-bin "--version"] {:out :string :err :string})]
+        (when-not (zero? exit)
+          (fs/delete-if-exists tmp-bin)
+          (throw (ex-info "Downloaded binary failed version check" {}))))
+      (fs/move tmp-bin bin-eca {:replace-existing true}))
     ;; Cleanup
     (fs/delete-if-exists tmp-zip)
     (fs/delete-tree tmp-dir)

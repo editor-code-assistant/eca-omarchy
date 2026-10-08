@@ -170,6 +170,19 @@ install_eca() {
   mkdir -p "$TMP_DIR"
   download "$url" "$TMP_DIR/eca.zip"
 
+  # Verify digest before extraction and execution — eca releases publish
+  # a companion .sha256 file for every zip asset.
+  local sha_url="${url}.sha256"
+  local expected_sha
+  expected_sha=$(fetch_json "$sha_url" 2>/dev/null | awk '{print $1}' || true)
+  if [[ -n "$expected_sha" ]]; then
+    echo "$expected_sha  $TMP_DIR/eca.zip" | sha256sum --check --quiet 2>>"$LOG" \
+      || die "eca checksum mismatch — download may be corrupted or tampered"
+    log "eca sha256 verified: $expected_sha"
+  else
+    die "Could not fetch eca checksum from $sha_url — refusing to execute unverified binary"
+  fi
+
   unzip -qq -o "$TMP_DIR/eca.zip" -d "$TMP_DIR/eca-extract" 2>>"$LOG" \
     || die "Could not extract eca zip"
 

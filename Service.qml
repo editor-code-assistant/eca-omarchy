@@ -138,10 +138,8 @@ Item {
           ecaBinary = String(data.path)
           for (var k in sessions) sessions[k].ecaBinary = ecaBinary
         }
-        Quickshell.execDetached([
-          "notify-send", "-a", "ECA", "-t", "6000",
-          "ECA updated to " + ecaInstallVersion, "Restart your session to use it."
-        ])
+        sendNotification("ECA updated to " + ecaInstallVersion,
+                         "Restart your session to use it.", 6000)
       }
     } catch (e) { /* update check is best-effort */ }
   }
@@ -294,13 +292,32 @@ Item {
     }
   }
 
+  // Sends a desktop notification with summary and body passed via environment
+  // variables so the content never appears in notify-send's argv
+  // (which would be visible in /proc/<pid>/cmdline).
+  Process {
+    id: notifyProc
+    // sh reads ECA_NOTIFY_SUMMARY and ECA_NOTIFY_BODY from its own environment;
+    // the command line itself contains only the variable names, not their values.
+    command: ["sh", "-c",
+      'notify-send -a ECA -u normal -t "$ECA_NOTIFY_TIMEOUT" "$ECA_NOTIFY_SUMMARY" "$ECA_NOTIFY_BODY"']
+  }
+
+  function sendNotification(summary, body, timeoutMs) {
+    notifyProc.environment = {
+      "ECA_NOTIFY_SUMMARY": String(summary || ""),
+      "ECA_NOTIFY_BODY":    String(body    || ""),
+      "ECA_NOTIFY_TIMEOUT": String(timeoutMs || 6000)
+    }
+    notifyProc.running = true
+  }
+
   function onSessionMessage(s, type, text) {
     if (!notifications || text === "") return
     if (type === "info" && text.indexOf("login") === -1) return
     // Normal urgency with a timeout: approvals are also shown in the chat and
     // by the pulsing bar icon, so stale notifications shouldn't pile up.
-    Quickshell.execDetached(["notify-send", "-a", "ECA", "-u", "normal", "-t", type === "error" ? "10000" : "6000",
-      "ECA · " + s.name, text])
+    sendNotification("ECA · " + s.name, text, type === "error" ? 10000 : 6000)
     if (type === "approval" || type === "question") attentionRequested(s.workspace, s.currentChatId)
   }
 
