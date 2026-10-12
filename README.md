@@ -129,7 +129,7 @@ the [ECA docs](https://eca.dev/config/introduction/).
 
 ```
 Panel.qml / ChatWindow.qml ── ChatView.qml (UI)
-        │ bar.shell.serviceFor("eca")
+        │ bar.shell.serviceFor("editor-code-assistant.eca-omarchy")
 Service.qml (singleton) ── Session.qml per workspace
         │ Quickshell Process, newline-delimited JSON
 eca_bridge.bb ── Content-Length framed JSON-RPC ── eca server

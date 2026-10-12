@@ -9,11 +9,11 @@ import qs.Ui
 // editor is involved. Middle-click toggles the pop-out chat window.
 Panel {
   id: root
-  moduleName: "eca"
+  moduleName: "editor-code-assistant.eca-omarchy"
   ipcTarget: "eca-panel"
 
   readonly property var service: bar && bar.shell && typeof bar.shell.serviceFor === "function"
-    ? bar.shell.serviceFor("eca") : null
+    ? bar.shell.serviceFor("editor-code-assistant.eca-omarchy") : null
   readonly property var session: service ? service.session : null
 
   readonly property string iconGlyph: String.fromCodePoint(0xF0674) // nf-md-creation (sparkles)

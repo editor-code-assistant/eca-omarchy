@@ -48,12 +48,12 @@ import json, sys
 d = json.load(open('$shell_json'))
 # Check plugins list (services / overlays / panels)
 for p in d.get('plugins', []):
-    if p.get('id') == 'eca':
+    if p.get('id') in ('eca', 'editor-code-assistant.eca-omarchy'):
         sys.exit(0)
 # Check bar layout sections
 for section in d.get('bar', {}).get('layout', {}).values():
     for w in section:
-        if w.get('id') == 'eca':
+        if w.get('id') in ('eca', 'editor-code-assistant.eca-omarchy'):
             sys.exit(0)
 sys.exit(1)
 " 2>/dev/null

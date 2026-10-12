@@ -122,13 +122,39 @@
                    {:dir (str d) :prefix prefix :hash hash}))))
     []))
 
-(defn resolve-paths [dirs]
+(defn index-workspaces
+  "Workspace folders ECA recorded in the cache dir's chat index (written by
+  every client, so this also covers sessions started from emacs/neovim in
+  folders outside our search roots). Nil when unreadable."
+  [dir]
+  (try
+    (let [idx (json/parse-string (slurp (str (fs/path dir "chats" "index.transit.json"))))
+          ;; transit-JSON map: ["^ " k1 v1 k2 v2 ...]
+          ws (when (and (sequential? idx) (= "^ " (first idx)))
+               (->> (rest idx) (partition 2) (some (fn [[k v]] (when (= k "~:workspaces") v)))))]
+      (when (and (sequential? ws) (every? string? ws)) (vec ws)))
+    (catch Exception _ nil)))
+
+(defn resolve-by-hash [dirs]
   (let [wanted (set (map :prefix dirs))
         by-hash (->> (candidate-dirs)
                      (filter #(contains? wanted (sanitize-name (fs/file-name %))))
                      (map #(str (fs/absolutize %)))
                      (reduce (fn [m p] (assoc m (paths-hash [p]) p)) {}))]
     (keep #(when-let [path (get by-hash (:hash %))] (assoc % :path path)) dirs)))
+
+(defn resolve-paths
+  "Maps cache dirs to folders. The chat index is authoritative; hashing
+  candidate folders is the fallback. Multi-root workspaces are skipped since
+  a session is opened on a single folder."
+  [dirs]
+  (let [from-index (keep (fn [d]
+                           (let [ws (index-workspaces (:dir d))]
+                             (when (and (= 1 (count ws)) (fs/directory? (first ws)))
+                               (assoc d :path (first ws)))))
+                         dirs)
+        done (set (map :dir from-index))]
+    (concat from-index (resolve-by-hash (remove #(done (:dir %)) dirs)))))
 
 (defn history [eca dir]
   (if-not eca

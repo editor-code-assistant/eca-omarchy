@@ -4,7 +4,7 @@ import Quickshell.Io
 
 // Headless ECA client service: owns one Session (one `eca server`) per
 // workspace folder, shared by every bar on every monitor. Bar widgets reach it
-// with bar.shell.serviceFor("eca").
+// with bar.shell.serviceFor("editor-code-assistant.eca-omarchy").
 Item {
   id: root
   property string omarchyPath: ""

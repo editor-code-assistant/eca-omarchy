@@ -93,3 +93,19 @@
     (doseq [ws (:workspaces (eca-workspaces/-main))]
       (is (int? (:chatCount ws)))
       (is (>= (:chatCount ws) 0)))))
+
+(deftest test-index-workspaces
+  (let [dir (str (babashka.fs/create-temp-dir))]
+    (babashka.fs/create-dirs (str dir "/chats"))
+    (testing "reads workspaces from the transit chat index"
+      (spit (str dir "/chats/index.transit.json")
+            "[\"^ \",\"~:version\",7,\"~:workspaces\",[\"/tmp\"],\"~:chats\",[\"^ \"]]")
+      (is (= ["/tmp"] (eca-workspaces/index-workspaces dir))))
+    (testing "resolve-paths uses the index even outside the search roots"
+      (is (= "/tmp" (:path (first (eca-workspaces/resolve-paths [{:dir dir :prefix "x" :hash "y"}]))))))
+    (testing "multi-root workspaces are skipped"
+      (spit (str dir "/chats/index.transit.json")
+            "[\"^ \",\"~:workspaces\",[\"/tmp\",\"/usr\"]]")
+      (is (empty? (eca-workspaces/resolve-paths [{:dir dir :prefix "x" :hash "y"}]))))
+    (testing "missing index returns nil"
+      (is (nil? (eca-workspaces/index-workspaces "/nonexistent"))))))
