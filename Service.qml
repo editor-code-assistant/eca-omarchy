@@ -292,24 +292,25 @@ Item {
     }
   }
 
-  // Sends a desktop notification with summary and body passed via environment
-  // variables so the content never appears in notify-send's argv
-  // (which would be visible in /proc/<pid>/cmdline).
+  // Sends a desktop notification via eca_notify.bb, which speaks the D-Bus
+  // wire protocol directly over the session bus unix socket — no subprocess
+  // receives the content as argv, so it never appears in /proc/<pid>/cmdline.
+  // Summary, body and timeout are written as a JSON line to stdin, which is
+  // not exposed in /proc at all (unlike argv or the process environment).
   Process {
     id: notifyProc
-    // sh reads ECA_NOTIFY_SUMMARY and ECA_NOTIFY_BODY from its own environment;
-    // the command line itself contains only the variable names, not their values.
-    command: ["sh", "-c",
-      'notify-send -a ECA -u normal -t "$ECA_NOTIFY_TIMEOUT" "$ECA_NOTIFY_SUMMARY" "$ECA_NOTIFY_BODY"']
+    command: bbCmd(pluginDir + "/eca_notify.bb")
+    stdinEnabled: true
   }
 
   function sendNotification(summary, body, timeoutMs) {
-    notifyProc.environment = {
-      "ECA_NOTIFY_SUMMARY": String(summary || ""),
-      "ECA_NOTIFY_BODY":    String(body    || ""),
-      "ECA_NOTIFY_TIMEOUT": String(timeoutMs || 6000)
-    }
     notifyProc.running = true
+    notifyProc.write(JSON.stringify({
+      summary: String(summary || ""),
+      body:    String(body    || ""),
+      timeout: timeoutMs || 6000
+    }))
+    notifyProc.closeStdin()
   }
 
   function onSessionMessage(s, type, text) {
