@@ -100,9 +100,7 @@ get_version() { "$1" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' |
 # ── Find existing binaries ───────────────────────────────────────────────────
 
 find_bb() {
-  for f in "$INSTALL_DIR/bb" "$HOME/.local/bin/bb"; do
-    [[ -x "$f" ]] && { echo "$f"; return; }
-  done
+  [[ -x "$INSTALL_DIR/bb" ]] && { echo "$INSTALL_DIR/bb"; return; }
   command -v bb 2>/dev/null || true
 }
 
@@ -138,12 +136,18 @@ install_bb() {
   mkdir -p "$TMP_DIR"
   download "$url" "$TMP_DIR/bb.tar.gz"
 
-  # Verify checksum when available
+  # Verify checksum before extraction — babashka releases always publish a
+  # companion .sha256 file; a missing checksum is treated as a fatal error so
+  # an unverified binary is never executed.
+  local sha_url="${url}.sha256"
   local sha
-  sha=$(fetch_json "${url}.sha256" 2>/dev/null | awk '{print $1}' || true)
+  sha=$(fetch_json "$sha_url" 2>/dev/null | awk '{print $1}' || true)
   if [[ -n "$sha" ]]; then
     echo "$sha  $TMP_DIR/bb.tar.gz" | sha256sum --check --quiet 2>>"$LOG" \
-      || die "Babashka checksum mismatch — download may be corrupted"
+      || die "Babashka checksum mismatch — download may be corrupted or tampered"
+    log "bb sha256 verified: $sha"
+  else
+    die "Could not fetch Babashka checksum from $sha_url — refusing to execute unverified binary"
   fi
 
   tar -xzf "$TMP_DIR/bb.tar.gz" -C "$TMP_DIR" bb
